@@ -28,10 +28,10 @@ public class TransactionsServiceImpl implements TransactionsService {
     @Override
     public StatisticsDTO getStatistics() {
 
-        BigDecimal sum = new BigDecimal(0).setScale(2, RoundingMode.HALF_UP);
-        BigDecimal avg = new BigDecimal(0).setScale(2, RoundingMode.HALF_UP);
-        BigDecimal max = new BigDecimal(0).setScale(2, RoundingMode.HALF_UP);
-        BigDecimal min = new BigDecimal(0).setScale(2, RoundingMode.HALF_UP);
+        BigDecimal sum = new BigDecimal(0);
+        BigDecimal avg = new BigDecimal(0);
+        BigDecimal max = new BigDecimal(0);
+        BigDecimal min = new BigDecimal(0);
         Long count = 0L;
 
         /* GET LAST 60 seg.*/
@@ -41,24 +41,31 @@ public class TransactionsServiceImpl implements TransactionsService {
         LOGGER.debug("CURRENT DATE TIME {}",currentDateTime);
 
         /* GET VALID TRANSACTIONS valid transaction= from 60 seg. to current time */
-        List<Transaction> validTransactions = transactions.stream().
-                filter(tran -> tran.getDateTime().isAfter(limitDateTime) && tran.getDateTime().isBefore(currentDateTime))
-                .collect(Collectors.toList());
+        if(Objects.nonNull(transactions) && !transactions.isEmpty()) {
+            int i = 0;
+            while (i < transactions.size() && transactions.get(i).getDateTime().isAfter(limitDateTime) &&
+                    transactions.get(i).getDateTime().isBefore(currentDateTime)) {
 
-        /* DELETE NO VALID TRANSACTIONS */
-        List<Transaction> transactionsToDelete=new ArrayList<>(transactions);
-        transactionsToDelete.removeAll(validTransactions);
-        transactions.removeAll(transactionsToDelete);
+                sum = sum.add(transactions.get(i).getAmount());
+                max = max.max(transactions.get(i).getAmount());
+                if (i == 0) {
+                    min = transactions.get(i).getAmount();
+                } else {
+                    min = min.min(transactions.get(i).getAmount());
+                }
+                i++;
+            }
 
-        if (Objects.nonNull(validTransactions) && !validTransactions.isEmpty()) {
-            sum = new BigDecimal(validTransactions.stream().mapToDouble(trans -> trans.getAmount().doubleValue()).sum()).setScale(2, RoundingMode.HALF_UP);
-            avg = new BigDecimal(validTransactions.stream().mapToDouble(trans -> trans.getAmount().doubleValue()).average().getAsDouble()).setScale(2, RoundingMode.HALF_UP);
-            max = new BigDecimal(validTransactions.stream().mapToDouble(trans -> trans.getAmount().doubleValue()).max().getAsDouble()).setScale(2, RoundingMode.HALF_UP);
-            min = new BigDecimal(validTransactions.stream().mapToDouble(trans -> trans.getAmount().doubleValue()).min().getAsDouble()).setScale(2, RoundingMode.HALF_UP);
-            count = Long.valueOf(validTransactions.size());
+            count = Long.valueOf(i);
+            BigDecimal divide = new BigDecimal(count);
+            avg = sum.divide(divide,2,RoundingMode.HALF_UP);
+
+            /* DELETE NO VALID TRANSACTIONS */
+            transactions=transactions.subList(0,i-1);
         }
 
-        return new StatisticsDTO(sum.toString(), avg.toString(), max.toString(), min.toString(), count);
+        return new StatisticsDTO(sum.setScale(2,RoundingMode.HALF_UP).toString(), avg.setScale(2,RoundingMode.HALF_UP).toString(),
+                max.setScale(2,RoundingMode.HALF_UP).toString(), min.setScale(2,RoundingMode.HALF_UP).toString(), count);
 
     }
 
@@ -66,6 +73,8 @@ public class TransactionsServiceImpl implements TransactionsService {
     public void saveTransaction(TransactionDTO transactionDTO) throws NotFoundException, UnprocessableException {
         ValidationUtils.validateTransaction(transactionDTO);
         transactions.add(new Transaction(transactionDTO));
+        //sort the list
+        transactions=transactions.stream().sorted(Comparator.comparing(Transaction::getDateTime).reversed()).collect(Collectors.toList());
     }
 
     @Override
