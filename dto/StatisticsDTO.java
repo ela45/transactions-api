@@ -17,6 +17,10 @@ public class StatisticsDTO {
         this.count = count;
     }
 
+    public StatisticsDTO() {
+
+    }
+
     public String getSum() {
         return sum;
     }
