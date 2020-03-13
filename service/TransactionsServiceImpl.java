@@ -14,29 +14,40 @@ import org.springframework.stereotype.Service;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDateTime;
+import java.time.temporal.TemporalUnit;
 import java.util.*;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 @Service
 public class TransactionsServiceImpl implements TransactionsService {
 
     private static final org.slf4j.Logger LOGGER = LoggerFactory.getLogger(TransactionsServiceImpl.class);
-    private static final List<Transaction> transactions = new ArrayList<Transaction>();
+    private static final Collection<Transaction> transactions = Collections.synchronizedCollection(new ArrayList<Transaction>());
     private static final StatisticsDTO statisticsDTO = new StatisticsDTO();
 
     @Override
-    public StatisticsDTO getStatistics() {
-        //calculateStatistics();
+    public synchronized StatisticsDTO getStatistics() {
+
         return statisticsDTO;
     }
 
     @Override
     public void saveTransaction(TransactionDTO transactionDTO) throws NotFoundException, UnprocessableException {
-        ValidationUtils.validateTransaction(transactionDTO);
-        //   synchronized (this) {
-        transactions.add(new Transaction(transactionDTO));
-        calculateStatistics();
-        //    }
+        try {
+            ValidationUtils.validateTransaction(transactionDTO);
+            synchronized (this) {
+                transactions.add(new Transaction(transactionDTO));
+
+            }
+        } catch (UnprocessableException e) {
+            throw new UnprocessableException();
+        } catch (NotFoundException e) {
+            throw new NotFoundException();
+        } finally {
+            calculateStatistics();
+        }
+
 
     }
 
@@ -50,46 +61,38 @@ public class TransactionsServiceImpl implements TransactionsService {
         /* GET LAST 60 seg.*/
         LocalDateTime currentDateTime = ValidationUtils.getUTCLocalDateTime();
         LocalDateTime limitDateTime = currentDateTime.minusSeconds(Constants.LAST_SECONDS_NUMBER);
-        LOGGER.info("LIMIT CURRENT DATE TIME {}", limitDateTime);
-        LOGGER.info("CURRENT DATE TIME {}", currentDateTime);
+        LOGGER.debug("LIMIT CURRENT DATE TIME {} size list {} ", limitDateTime, transactions.size());
 
         /* GET VALID TRANSACTIONS valid transaction= from 60 seg. to current time */
 
-        int i=0;
+
         synchronized (this) {
+            AtomicInteger i = new AtomicInteger(0);
             if (Objects.nonNull(transactions) && !transactions.isEmpty()) {
                 Iterator<Transaction> iterator = transactions.iterator();
 
                 while (iterator.hasNext()) {
                     Transaction trans = iterator.next();
 
-                    if (trans.getDateTime().isAfter(limitDateTime) &&
-                            trans.getDateTime().isBefore(currentDateTime)) {
-                        sum = sum.add(trans.getAmount());
-                        max = max.max(trans.getAmount());
-                        if (i == 0) {
-                            min = trans.getAmount();
-                        } else {
-                            min = min.min(trans.getAmount());
-                        }
-                        i++;
-                    //    LOGGER.info("calculating statistic transaction {} i {} ", trans.getDateTime(), i);
+                    sum = sum.add(trans.getAmount());
+                    max = max.max(trans.getAmount());
+                    if (i.get() == 0) {
+                        min = trans.getAmount();
                     } else {
-                        //REMOVE OLD TRANSACTIONS
-                        LOGGER.info("Deleting old transaction " + trans.getDateTime());
-                        iterator.remove();
+                        min = min.min(trans.getAmount());
                     }
+                    i.incrementAndGet();
 
                 }
-                if (i > 0) {
-                    count = Long.valueOf(i);
+                if (i.get() > 0) {
+                    count = Long.valueOf(i.get());
                     BigDecimal divide = new BigDecimal(count);
                     avg = sum.divide(divide, 2, RoundingMode.HALF_UP);
                 }
 
 
             }
-            LOGGER.info("COUNT!!!!!!!!!!!!!!!!!!!!!!!!! "+i);
+
             statisticsDTO.setSum(sum.setScale(2, RoundingMode.HALF_UP).toString());
             statisticsDTO.setAvg(avg.setScale(2, RoundingMode.HALF_UP).toString());
             statisticsDTO.setMax(max.setScale(2, RoundingMode.HALF_UP).toString());
@@ -99,15 +102,29 @@ public class TransactionsServiceImpl implements TransactionsService {
     }
 
     @Override
-    public void deleteAllTransactions() {
+    public synchronized void deleteAllTransactions() {
         transactions.clear();
     }
 
-    @Scheduled(fixedRate = 1000)
+    @Scheduled(cron = "* * * * * ?")
     public void executeCalculateTransactions() {
-        System.out.println("Calcular estatistics..."+LocalDateTime.now());
-       // synchronized (this) {
-            calculateStatistics();
-      //  }
+        LOGGER.info("Delete transactions...");
+        removeOldTransactions();
+        calculateStatistics();
+
+
+    }
+
+    public synchronized void removeOldTransactions() {
+        LocalDateTime currentDateTime = ValidationUtils.getUTCLocalDateTime();
+        LocalDateTime limitDateTime = currentDateTime.minusSeconds(Constants.LAST_SECONDS_NUMBER);
+
+        LOGGER.debug("REMOVE OLD limit date {} size! list {} ", limitDateTime, transactions.size());
+
+        transactions.removeIf(transaction -> (transaction.getDateTime().isBefore(limitDateTime) ||
+                (transaction.getDateTime().getHour() == limitDateTime.getHour() &&
+                        transaction.getDateTime().getMinute() == limitDateTime.getMinute() &&
+                        transaction.getDateTime().getSecond() == limitDateTime.getSecond())));
+
     }
 }

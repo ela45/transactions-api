@@ -3,11 +3,11 @@ package com.app.dto;
 import java.math.BigDecimal;
 
 public class StatisticsDTO {
-    private String sum;
-    private String avg;
-    private String max;
-    private String min;
-    private Long count;
+    private String sum="0.00";
+    private String avg="0.00";
+    private String max="0.00";
+    private String min="0.00";
+    private Long count=0L;
 
     public StatisticsDTO(String sum, String avg, String max, String min, Long count) {
         this.sum = sum;
